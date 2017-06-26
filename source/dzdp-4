@@ -1,0 +1,70 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+# Created on 2017-05-03 09:38:03
+# Project: getUserDetail
+#根据第一个pyspider项目中爬取的用户ID，获取这些用户更加详细的点评信息
+#第一个项目中爬取的字段结构包括：
+#userId（用户ID），shopId（商家ID），shopName（用户名称），taste（用户对该商家的口味评分），environment（用户对该商家的环境评分），service（用户对该商家的服务评分）
+#本项目爬取对应用户ID的如下信息：
+#用户ID，商户ID，人均价格，商圈，菜系，经度，纬度
+from pyspider.libs.base_handler import *
+import csv
+import re
+import math
+
+
+class Handler(BaseHandler):
+    crawl_config = {
+    }
+
+    @every(minutes=24 * 60)
+    def on_start(self):
+        csvfile = file('/home/xuqiang/DZDP02.csv','rb')
+        reader = csv.reader(csvfile)
+        for line in reader:
+            memberId = line[6]
+            url = 'http://www.dianping.com/member/'+str(memberId)+'/reviews?pg=1&reviewCityId=16&reviewShopType=10&c=1&shopTypeIndex=1'
+            self.crawl(url, callback=self.pagenum_page,fetch_type='js',save={'memberId':memberId})
+    
+    
+    @config(priority=2)
+    def pagenum_page(self, response):
+        # 用户Id
+        memberId =  response.save['memberId']        
+        # 得到评论数
+        commentNum =  re.findall(r"\d+\.?\d*",response.doc('div.p-tabs-box a[href^="http://www.dianping.com/member/"]').text())[0]
+        # 得到评论页数
+        pageNum = int(math.ceil(int(commentNum)/15))
+        pg = 0
+        while pg<pageNum:
+            pg = pg+1
+            url = 'http://www.dianping.com/member/'+str(memberId)+'/reviews?pg='+str(pg)+'&reviewCityId=16&reviewShopType=10&c=1&shopTypeIndex=1'
+            self.crawl(url,callback=self.index_page, save={'memberId': memberId})  
+            
+            
+    @config(age=10 * 24 * 60 * 60)
+    def index_page(self, response):
+          memberId =  response.save['memberId']  
+          for each in response.doc('a[href^="http://www.dianping.com/shop/"]').items():
+                if re.match("http://www.dianping.com/shop/\d+", each.attr.href, re.U):
+                    shopId = re.findall(r"\d+\.?\d*",each.attr.href)[0]
+                    self.crawl('http://www.dianping.com/shop/'+shopId, callback=self.detail_page,fetch_type='js',save={'memberId':memberId,'shopId': shopId})
+                
+
+    @config(priority=2)
+    def detail_page(self, response):
+        imgurl = response.doc('#map > img').attr.src   
+        latLng=re.findall(r"\d\d.\d+\.?\d*,\d\d\d.\d+\.?\d*",imgurl)[0]
+        lat=latLng.split(',')[0]
+        lng=latLng.split(',')[1]
+        return {
+            'memberId':response.save['memberId'],
+            'shopId': response.save['shopId'],
+            "avgPrice":re.findall(r"\d+\.?\d*",response.doc('#avgPriceTitle').text())[0],            
+            'shop_district':response.doc('#body > div.body-content.clearfix > div.breadcrumb > a:nth-child(2)').text(),
+            'cosine':response.doc('#body > div.body-content.clearfix > div.breadcrumb > a:nth-child(3)').text(),
+            "lat": lat,
+            "lng": lng,            
+        }
+    
+   

@@ -1,0 +1,89 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+# Created on 2017-03-23 19:55:46
+# Project: DZDP_businessLists
+#爬取武汉市各个商区的美食商家数据
+#每条记录的结构为：商户ID，商家名称，商户所属商圈，菜系，品均星级，五星数量，四星数量，三星数量，二星数量，一星数量，点评数量，人均价格，口味评分，环境评分，服务评分，详细地址，经度，纬度。
+
+
+from pyspider.libs.base_handler import *
+from bs4 import BeautifulSoup
+import re
+
+class Handler(BaseHandler):
+    crawl_config = {
+    }
+
+    @every(minutes=24 * 60)
+    def on_start(self):
+        self.crawl('http://www.dianping.com/search/category/16/10/r111o10p46', callback=self.business_district_page, fetch_type='js')
+
+    @config(age=10 * 24 * 60 * 60)
+    def business_district_page(self, response): 
+        soup = BeautifulSoup(response.text)      
+        districts_div = soup.find('div', id="region-nav")
+       # districts_div=response.doc('#region-nav')
+        for link in districts_div.find_all('a'): 
+            page =0
+            while page<50:
+                page=page+1
+                district_href = 'http://www.dianping.com'+link.get('href')+'p'+str(page)
+                region=link.text
+                #print district_href
+                self.crawl(district_href, callback=self.business_page,fetch_type='js',save=({'region':region}))
+                #http://www.dianping.com/search/category/16/10/r111o10p1         
+    
+    def business_page(self,response):
+        soup = BeautifulSoup(response.text)
+        region = response.save['region']
+        business_all=soup.find('div',class_='shop-list J_shop-list shop-all-list').find('ul')
+        for business in business_all.find_all('li'): 
+            link = 'http://www.dianping.com'+ business.find('div',class_='txt').find('div',class_='tit').find('a').get('href')
+            self.crawl(link, callback=self.detail_page,fetch_type='js',save=({'region':region}))
+        
+        
+    @config(priority=2)
+    def detail_page(self, response):
+        soup = BeautifulSoup(response.text)       
+        infos= soup.find('div', class_="brief-info").find_all('span')
+        starts_avg = re.findall(r"\d",infos[0].get('class')[1])[0]       
+        comment_counts = re.findall(r"\d+\.?\d*",infos[1].text)[0]
+        avg_price = re.findall(r"\d+\.?\d*",infos[2].text)[0] 
+        starts_seperate=soup.find('ul',class_="stars").find_all('li')
+        five_starts_count=starts_seperate[0].text.strip()
+        four_starts_count=starts_seperate[1].text.strip()
+        three_starts_count=starts_seperate[2].text.strip()
+        two_starts_count=starts_seperate[3].text.strip()
+        one_start_count=starts_seperate[4].text.strip()
+        marks = infos[3].find_all('span')
+        if(marks <1000):
+            return 
+        shopTaste =re.findall(r"\d+\.?\d*",marks[0].text)[0] 
+        shopEnvironment=re.findall(r"\d+\.?\d*",marks[1].text)[0] 
+        shopService=re.findall(r"\d+\.?\d*",marks[2].text)[0] 
+        address = soup.find('span',class_="item",itemprop="street-address").text.strip()
+        imgurl = soup.find('div',id="map", class_="container").find('img').get('src')
+        cuisine =response.doc('#body > div.body-content.clearfix > div.breadcrumb > a:nth-child(3)').text()
+        lat=re.findall(r"\d\d.\d\d\d\d\d",imgurl)[0]
+        lng = re.findall(r"\d\d\d.\d\d\d\d\d",imgurl)[0]
+        return {
+            "business_id":re.findall(r"\d+\.?\d*",response.url)[0],
+            "businesss_name": soup.find('h1',class_='shop-name').text.split(" ")[0],
+            "region":response.save['region'],
+            "cuisine":cuisine,
+            "starts_avg": starts_avg,
+            "five_starts_count":five_starts_count,
+            "four_starts_count":four_starts_count,
+            "three_starts_count":three_starts_count,
+            "two_starts_count":two_starts_count,
+            "one_start_count":one_start_count,
+            "comment_counts":comment_counts,
+            "avg_price":avg_price,         
+            "shopTaste":shopTaste,
+            "shopEnvironment":shopEnvironment,
+            "shopService":shopService,
+            "address":address,  
+            "lat":lat,
+            "lng":lng
+        }
+    

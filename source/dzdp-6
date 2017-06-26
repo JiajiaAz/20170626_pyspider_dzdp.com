@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+# Created on 2017-04-11 19:14:14
+# Project: shopInfo
+#根据第一个项目中爬取的商户ID，获取对应商户的商圈数据
+#数据结构为：
+#商家ID，商圈
+from pyspider.libs.base_handler import *
+
+
+class Handler(BaseHandler):
+    crawl_config = {
+    }
+
+    @every(minutes=24 * 60)
+    def on_start(self):
+        fo = open('/home/xuqiang/DZDP022.csv','rb')        
+        line = fo.readlines()
+        fo.close()        
+        for shopId in line:
+            url = 'http://www.dianping.com/shop/'+str(shopId)        
+            self.crawl(url, callback=self.detail_page,save={'shopId':shopId})
+
+  
+    @config(priority=2)
+    def detail_page(self, response):
+        district = response.doc('#body > div.body-content.clearfix > div.breadcrumb > a:nth-child(2)').text()
+        return {
+            "shopId": response.save['shopId'],
+            "district": district
+        }
+
